@@ -58,24 +58,11 @@ for key, value in defaults.items():
 
 uploaded_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
-def reset_image_state():
-    for key, value in defaults.items():
-        st.session_state[key] = value
-
 if uploaded_file is not None:
-
-    file_bytes = uploaded_file.getvalue()
-    file_hash = hashlib.md5(file_bytes).hexdigest()
-
-    if "last_file_hash" not in st.session_state:
-        st.session_state.last_file_hash = None
-
-    if file_hash != st.session_state.last_file_hash:
-        st.session_state.last_file_hash = file_hash
-        reset_image_state()
-
-    # IMPORTANT: store image in session state
-    st.session_state.image = Image.open(uploaded_file)
+    # Always store a PIL Image in session state
+    st.session_state.image = Image.open(uploaded_file).convert("RGBA")
+    # Optionally store the raw bytes if needed for download
+    st.session_state.image_bytes = uploaded_file.getvalue()
 
 # Later in your app:
 if st.session_state.image is not None:
