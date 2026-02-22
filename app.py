@@ -319,21 +319,6 @@ if st.session_state.image:
 
     download_image = warped_image.copy()
     
-    if st.session_state.cut_to_rect:
-        left = st.session_state.rect_left_width_margin
-        top = st.session_state.rect_top_height_margin
-        right = download_image.width - st.session_state.rect_right_width_margin
-        bottom = download_image.height - st.session_state.rect_bottom_height_margin
-    
-        # Safety clamp
-        left = max(0, left)
-        top = max(0, top)
-        right = min(download_image.width, right)
-        bottom = min(download_image.height, bottom)
-    
-        if right > left and bottom > top:
-            download_image = download_image.crop((left, top, right, bottom))
-    
     img_bytes = io.BytesIO()
     download_image.save(img_bytes, format="PNG")
     img_bytes.seek(0)
