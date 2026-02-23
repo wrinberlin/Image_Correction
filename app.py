@@ -13,27 +13,38 @@ from PIL import Image, ImageDraw
 from utils import rotate
 import io
 import numpy as np
-import hashlib
 from skimage.transform import ProjectiveTransform, warp
 
-from utils import add_watermark_to_image
+from utils import resize_if_needed, add_watermark_to_image, how_to_use_text
 
 st.set_page_config(page_title="Image Rotator + Warp + Rectangle", layout="wide")
-st.title("Image Upload, Rotate, Warp & Reference Rectangle")
+st.title("Image Correction")
+
+# =============================================================================
+# Constants
+# =============================================================================
+
+MAX_SIZE = 1000
 
 # ---------------------
 # Session State Defaults
 # ---------------------
 
 defaults = {
-    "degrees": 0,
+    "show_help": True,
     "image": None,
-    "rotated_image": None,
+    "orig_image": None,
+    "resized": False,
+    "scale_factor": 1.0,
+    "show_resize_toast": False,
+    "cut_image": None,
     "show_rectangle": False,
     "rect_left_width_margin": 10,
     "rect_right_width_margin": 10,
     "rect_top_height_margin": 10,
     "rect_bottom_height_margin": 10,
+    "rect_increment": 5,
+    "degrees": 0,
     "warp_tl_x_offset": 0.0,
     "warp_tl_y_offset": 0.0,
     "warp_tr_x_offset": 0.0,
@@ -45,12 +56,22 @@ defaults = {
     "watermark_enabled": False, 
     "show_watermark_input": False,
     "watermark_text": "© ", 
+    "watermark_text_orig": "",
     "cut_to_rect": False,
 }
 
 for key, value in defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = value
+        st.session_state[key] = value 
+
+if st.session_state.show_help: 
+    with st.expander("How to use the app", expanded=False):
+        st.write(how_to_use_text)
+
+if st.session_state.show_help: 
+    if st.button("Do not show again"): 
+        st.session_state.show_help = False
+        st.rerun()
 
 # ---------------------
 # Upload Image
@@ -60,19 +81,36 @@ uploaded_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
     # Always store a PIL Image in session state
-    st.session_state.image = Image.open(uploaded_file).convert("RGBA")
+    image = Image.open(uploaded_file).convert("RGBA")
+    resized_img, resized, scale_factor = resize_if_needed(image, MAX_SIZE)
+    
+    if resized:
+        st.session_state.image = resized_img
+        st.session_state.orig_image = image
+        st.session_state.show_resize_toast = True   # 👈 SET FLAG
+        st.session_state.scale_factor = scale_factor
+    else:
+        st.session_state.image = image
+        
+    st.session_state.resized = resized
+    
+    image_width, image_height = st.session_state.image.size
+    if image_width > MAX_SIZE: 
+        st.session_state.rect_increment = int(image_width * 0.005) 
+    if image_height > MAX_SIZE: 
+        st.session_state.rect_increment = int(image_height * 0.005)
     # Optionally store the raw bytes if needed for download
     st.session_state.image_bytes = uploaded_file.getvalue()
 
-# Later in your app:
-if st.session_state.image is not None:
-    image = st.session_state.image
+if st.session_state.get("show_resize_toast", False):
+    st.warning("Image was resized to improve performance.", icon="⚠️")
+    st.session_state.show_resize_toast = False  # 👈 Reset flag
 
 # ---------------------
 # Layout: Controls Left, Image Right
 # ---------------------
 if st.session_state.image:
-    control_col, image_col = st.columns([3, 4])
+    control_col, image_col = st.columns([1, 1])
 
     # ---------------------
     # Control Panel (left column)
@@ -91,21 +129,21 @@ if st.session_state.image:
         st.write("**Rectangle Size**")
         size_col1, size_col2, size_col3, size_col4, size_col5, size_col6, size_col7, size_col8 = st.columns(8)
         with size_col1:
-            if st.button("| ➡️"): st.session_state.rect_left_width_margin += 5
+            if st.button("| ▶"): st.session_state.rect_left_width_margin += st.session_state.rect_increment
         with size_col2:
-            if st.button("| ⬅️"): st.session_state.rect_left_width_margin -= 5
+            if st.button("| ◀"): st.session_state.rect_left_width_margin -= st.session_state.rect_increment
         with size_col3:
-            if st.button("➡️ |"): st.session_state.rect_right_width_margin -= 5
+            if st.button("▶ |"): st.session_state.rect_right_width_margin -= st.session_state.rect_increment
         with size_col4:
-            if st.button("⬅️ |"): st.session_state.rect_right_width_margin += 5
+            if st.button("◀ |"): st.session_state.rect_right_width_margin += st.session_state.rect_increment
         with size_col5:
-            if st.button("‾‾⬇️"): st.session_state.rect_top_height_margin += 5
+            if st.button("‾ ▼"): st.session_state.rect_top_height_margin += st.session_state.rect_increment
         with size_col6:
-            if st.button("‾‾⬆️"): st.session_state.rect_top_height_margin -= 5
+            if st.button("‾ ▲"): st.session_state.rect_top_height_margin -= st.session_state.rect_increment
         with size_col7:
-            if st.button("__⬇️"): st.session_state.rect_bottom_height_margin -= 5
+            if st.button("_ ▼"): st.session_state.rect_bottom_height_margin -= st.session_state.rect_increment
         with size_col8:
-            if st.button("__⬆️"): st.session_state.rect_bottom_height_margin += 5
+            if st.button("_ ▲"): st.session_state.rect_bottom_height_margin += st.session_state.rect_increment
 
         st.subheader("Rotation Controls")
         rot_col1, rot_col2, rot_col3, rot_col4 = st.columns(4)
@@ -127,19 +165,19 @@ if st.session_state.image:
         warp_tl_col1, warp_tl_col2, warp_tl_col3, warp_tl_col4 = st.columns(4)
 
         with warp_tl_col1:
-            if st.button("Top-Left ⬅"):
+            if st.button("Top-Left ◀"):
                 st.session_state.warp_tl_x_offset -= 0.01
         
         with warp_tl_col2:
-            if st.button("Top-Left ➡"):
+            if st.button("Top-Left ▶"):
                 st.session_state.warp_tl_x_offset += 0.01
         
         with warp_tl_col3:
-            if st.button("Top-Left ⬆"):
+            if st.button("Top-Left ▲"):
                 st.session_state.warp_tl_y_offset -= 0.01
         
         with warp_tl_col4:
-            if st.button("Top-Left ⬇"):
+            if st.button("Top-Left ▼"):
                 st.session_state.warp_tl_y_offset += 0.01
                 
         st.caption(f"X: {st.session_state.warp_tl_x_offset:.2f} | Y: {st.session_state.warp_tl_y_offset:.2f}")
@@ -149,19 +187,19 @@ if st.session_state.image:
         warp_tr_col1, warp_tr_col2, warp_tr_col3, warp_tr_col4 = st.columns(4)
 
         with warp_tr_col1:
-            if st.button("Top-Right ⬅"):
+            if st.button("Top-Right ◀"):
                 st.session_state.warp_tr_x_offset -= 0.01
         
         with warp_tr_col2:
-            if st.button("Top-Right ➡"):
+            if st.button("Top-Right ▶"):
                 st.session_state.warp_tr_x_offset += 0.01
         
         with warp_tr_col3:
-            if st.button("Top-Right ⬆"):
+            if st.button("Top-Right ▲"):
                 st.session_state.warp_tr_y_offset -= 0.01
         
         with warp_tr_col4:
-            if st.button("Top-Right ⬇"):
+            if st.button("Top-Right ▼"):
                 st.session_state.warp_tr_y_offset += 0.01
                 
         st.caption(f"X: {st.session_state.warp_tr_x_offset:.2f} | Y: {st.session_state.warp_tr_y_offset:.2f}")
@@ -171,19 +209,19 @@ if st.session_state.image:
         warp_bl_col1, warp_bl_col2, warp_bl_col3, warp_bl_col4 = st.columns(4)
 
         with warp_bl_col1:
-            if st.button("Bottom-Left ⬅"):
+            if st.button("Bottom-Left ◀"):
                 st.session_state.warp_bl_x_offset -= 0.01
         
         with warp_bl_col2:
-            if st.button("Bottom-Left ➡"):
+            if st.button("Bottom-Left ▶"):
                 st.session_state.warp_bl_x_offset += 0.01
         
         with warp_bl_col3:
-            if st.button("Bottom-Left ⬆"):
+            if st.button("Bottom-Left ▲"):
                 st.session_state.warp_bl_y_offset -= 0.01
         
         with warp_bl_col4:
-            if st.button("Bottom-Left ⬇"):
+            if st.button("Bottom-Left ▼"):
                 st.session_state.warp_bl_y_offset += 0.01
                 
         st.caption(f"X: {st.session_state.warp_bl_x_offset:.2f} | Y: {st.session_state.warp_bl_y_offset:.2f}")
@@ -260,7 +298,10 @@ if st.session_state.image:
         "Remove Watermark" if st.session_state.watermark_enabled else "Add Watermark"
         ):
         st.session_state.watermark_enabled = not st.session_state.watermark_enabled
-        st.session_state.show_watermark_input = st.session_state.watermark_enabled
+        st.session_state.show_watermark_input = st.session_state.watermark_enabled 
+        if not st.session_state.watermark_enabled:
+            # Clear the original watermark if the user removes it
+            st.session_state.watermark_text_orig = ""
     
     if st.session_state.show_watermark_input:
         st.session_state.watermark_text = st.text_input(
@@ -275,8 +316,8 @@ if st.session_state.image:
             )
             st.session_state.watermark_enabled = not st.session_state.watermark_enabled
             st.session_state.show_watermark_input = False 
+            st.session_state.watermark_text_orig = st.session_state.watermark_text
             st.session_state.watermark_text = "© "
-            
     # ---------------------
     # Cut to rectangle
     # ---------------------
@@ -295,6 +336,7 @@ if st.session_state.image:
     
         if right > left and bottom > top:
             warped_image = warped_image.crop((left, top, right, bottom))
+            st.session_state.cut_image = warped_image.copy()
             st.session_state.cut_to_rect = True
         
     # ---------------------
@@ -303,8 +345,11 @@ if st.session_state.image:
     
     with image_col:
         st.image(warped_image, width=display_image_width)
-
-    download_image = warped_image.copy()
+        
+    if st.session_state.cut_image != None: 
+        download_image = st.session_state.cut_image.copy()
+    else: 
+        download_image = warped_image.copy()
     
     img_bytes = io.BytesIO()
     download_image.save(img_bytes, format="PNG")
@@ -316,6 +361,95 @@ if st.session_state.image:
         file_name="processed_image.png",
         mime="image/png"
     )
-
-
-
+    
+    # ---------------------
+    # Download Original Image (Altered)
+    # ---------------------
+    
+    # Button to trigger heavy processing
+    if st.session_state.resized:
+        if st.button("Prepare Original Image (Altered)"):
+            # Make a copy of the original full-res image
+            orig_img = st.session_state.orig_image.copy()
+    
+            # ---------------------
+            # Apply rotation
+            # ---------------------
+            if st.session_state.degrees != 0:
+                orig_img = rotate(orig_img, st.session_state.degrees).convert("RGBA")
+    
+            # ---------------------
+            # Apply trapezoidal warp
+            # ---------------------
+            img_array = np.array(orig_img)
+            h, w = img_array.shape[:2]
+            scale_w = w / st.session_state.image.width
+            scale_h = h / st.session_state.image.height
+    
+            src = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+            dst = np.array([
+                [
+                    st.session_state.warp_tl_x_offset * st.session_state.image.width * scale_w,
+                    st.session_state.warp_tl_y_offset * st.session_state.image.height * scale_h,
+                ],
+                [
+                    w + st.session_state.warp_tr_x_offset * st.session_state.image.width * scale_w,
+                    st.session_state.warp_tr_y_offset * st.session_state.image.height * scale_h,
+                ],
+                [
+                    w + st.session_state.warp_br_x_offset * st.session_state.image.width * scale_w,
+                    h + st.session_state.warp_br_y_offset * st.session_state.image.height * scale_h,
+                ],
+                [
+                    st.session_state.warp_bl_x_offset * st.session_state.image.width * scale_w,
+                    h + st.session_state.warp_bl_y_offset * st.session_state.image.height * scale_h,
+                ],
+            ])
+    
+            transform = ProjectiveTransform()
+            transform.estimate(dst, src)
+            warped = warp(img_array, transform, output_shape=(h, w))
+            orig_img = Image.fromarray((warped * 255).astype(np.uint8))
+    
+            # ---------------------
+            # Cut to rectangle if requested
+            # ---------------------
+            if st.session_state.cut_to_rect:
+                left = st.session_state.rect_left_width_margin * scale_w
+                top = st.session_state.rect_top_height_margin * scale_h
+                right = orig_img.width - st.session_state.rect_right_width_margin * scale_w
+                bottom = orig_img.height - st.session_state.rect_bottom_height_margin * scale_h
+    
+                left = max(0, left)
+                top = max(0, top)
+                right = min(orig_img.width, right)
+                bottom = min(orig_img.height, bottom)
+    
+                if right > left and bottom > top:
+                    orig_img = orig_img.crop((left, top, right, bottom))
+    
+            # ---------------------
+            # Apply watermark if enabled
+            # ---------------------
+            
+            if st.session_state.watermark_text_orig != "":
+                orig_img = add_watermark_to_image(orig_img, st.session_state.watermark_text_orig)
+                
+            # Store processed bytes in session state
+            img_bytes = io.BytesIO()
+            orig_img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+            st.session_state.original_image_bytes = img_bytes
+    
+            st.success("Original image (altered) is ready for download!")
+    
+            # ---------------------
+            # Show download button only if processed
+            # ---------------------
+            if "original_image_bytes" in st.session_state:
+                st.download_button(
+                    label="Download Original Image (Altered)",
+                    data=st.session_state.original_image_bytes,
+                    file_name="original_image_altered.png",
+                    mime="image/png"
+                )
