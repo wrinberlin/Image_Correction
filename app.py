@@ -25,6 +25,8 @@ st.title("Image Correction")
 # =============================================================================
 
 MAX_SIZE = 1000
+RECT_BORDER_WIDTH = 4
+offset = RECT_BORDER_WIDTH // 2
 
 # ---------------------
 # Session State Defaults
@@ -103,7 +105,7 @@ if uploaded_file is not None:
     st.session_state.image_bytes = uploaded_file.getvalue()
 
 if st.session_state.get("show_resize_toast", False):
-    st.warning("Image was resized to improve performance.", icon="⚠️")
+    st.warning("Image was resized to improve performance. If you wish, all your alterations can be transformed to the original image at the end, which you can then download. ", icon="⚠️")
     st.session_state.show_resize_toast = False  # 👈 Reset flag
 
 # ---------------------
@@ -287,7 +289,7 @@ if st.session_state.image:
              warped_image.width - st.session_state.rect_right_width_margin,
              warped_image.height - st.session_state.rect_bottom_height_margin],
             outline="red",
-            width=3
+            width=4
         )
 
     # ---------------------
@@ -323,10 +325,10 @@ if st.session_state.image:
     # ---------------------
     
     if st.button("Cut to Rectangle"):
-        left = st.session_state.rect_left_width_margin
-        top = st.session_state.rect_top_height_margin
-        right = warped_image.width - st.session_state.rect_right_width_margin
-        bottom = warped_image.height - st.session_state.rect_bottom_height_margin
+        left = st.session_state.rect_left_width_margin + offset
+        top = st.session_state.rect_top_height_margin + offset
+        right = warped_image.width - st.session_state.rect_right_width_margin - offset
+        bottom = warped_image.height - st.session_state.rect_bottom_height_margin - offset
     
         # Safety clamp (important!)
         left = max(0, left)
