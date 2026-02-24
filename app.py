@@ -91,17 +91,17 @@ if uploaded_file is not None:
     st.session_state.resized = resized
     st.session_state.scale_factor = scale_factor
     
-    image_width, image_height = st.session_state.image.size
-    if image_width > MAX_SIZE: 
-        st.session_state.rect_increment = int(image_width * 0.005) 
-    if image_height > MAX_SIZE: 
-        st.session_state.rect_increment = int(image_height * 0.005)
+    st.session_state.show_resize_toast = resized
+
+    if resized:
+        image_width, image_height = st.session_state.image.size
+        st.session_state.rect_increment = int(max(image_width, image_height) * 0.005)
     # Optionally store the raw bytes if needed for download
     st.session_state.image_bytes = uploaded_file.getvalue()
 
-if st.session_state.get("show_resize_toast", False):
-    st.warning("Image was resized to improve performance. If you wish, all your alterations can be transformed to the original image at the end, which you can then download. ", icon="⚠️")
-    st.session_state.show_resize_toast = False  # 👈 Reset flag
+if st.session_state.show_resize_toast:
+    st.info("Image was resized to improve performance. If you wish, all your alterations can at the end be applied to the original image, which you can then download. ", icon="ℹ️")
+    # st.session_state.show_resize_toast = False  # 👈 Reset flag
 
 # ---------------------
 # Layout: Controls Left, Image Right
