@@ -7,6 +7,53 @@ Created on Sat Feb 21 13:18:11 2026
 
 from PIL import Image, ImageDraw, ImageFont
 import os
+import io 
+import numpy as np 
+from skimage.transform import  ProjectiveTransform, warp
+import streamlit as st
+
+@st.cache_data
+def resize_image(image_bytes, max_size):
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    resized_img, resized, scale_factor = resize_if_needed(image, max_size)
+    return resized_img, resized, scale_factor 
+
+@st.cache_data
+def transform_image(image, degrees, warp_offsets):
+    img = rotate(image, degrees).convert("RGBA")
+    img_array = np.array(img)
+    h, w = img_array.shape[:2]
+
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+
+    dst = np.array([
+        [warp_offsets["tl_x"] * w, warp_offsets["tl_y"] * h],
+        [w + warp_offsets["tr_x"] * w, warp_offsets["tr_y"] * h],
+        [w + warp_offsets["br_x"] * w, h + warp_offsets["br_y"] * h],
+        [warp_offsets["bl_x"] * w, h + warp_offsets["bl_y"] * h]
+    ])
+
+    transform = ProjectiveTransform()
+    transform.estimate(dst, src)
+
+    warped = warp(
+        img_array,
+        transform,
+        output_shape=(h, w),
+        preserve_range=True
+    )
+
+    warped = warped.astype(np.uint8)
+    result = Image.fromarray(warped, mode="RGBA")
+
+    return result
+
+
+@st.cache_data
+def apply_watermark_permanent(warped_image, watermark_text):
+    if watermark_text:
+        return add_watermark_to_image(warped_image.copy(), watermark_text)
+    return warped_image
 
 def resize_if_needed(image, max_size):
     original_width, original_height = image.size
@@ -70,6 +117,85 @@ def add_watermark_to_image(image, watermark_text):
     
     combined = Image.alpha_composite(image, temp_layer)
     return combined
+
+def prepare_orig_image():
+    # Make a copy of the original full-res image
+    orig_img = st.session_state.orig_image.copy()
+
+    # ---------------------
+    # Apply rotation
+    # ---------------------
+    if st.session_state.degrees != 0:
+        orig_img = rotate(orig_img, st.session_state.degrees).convert("RGBA")
+
+    # ---------------------
+    # Apply trapezoidal warp
+    # ---------------------
+    img_array = np.array(orig_img)
+    h, w = img_array.shape[:2]
+    scale_w = w / st.session_state.image.width
+    scale_h = h / st.session_state.image.height
+
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.array([
+        [
+            st.session_state.warp_tl_x_offset * st.session_state.image.width * scale_w,
+            st.session_state.warp_tl_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            w + st.session_state.warp_tr_x_offset * st.session_state.image.width * scale_w,
+            st.session_state.warp_tr_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            w + st.session_state.warp_br_x_offset * st.session_state.image.width * scale_w,
+            h + st.session_state.warp_br_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            st.session_state.warp_bl_x_offset * st.session_state.image.width * scale_w,
+            h + st.session_state.warp_bl_y_offset * st.session_state.image.height * scale_h,
+        ],
+    ])
+
+    transform = ProjectiveTransform()
+    transform.estimate(dst, src)
+    warped = warp(img_array, transform, output_shape=(h, w))
+    orig_img = Image.fromarray((warped * 255).astype(np.uint8))
+
+    # ---------------------
+    # Cut to rectangle if requested
+    # ---------------------
+    if st.session_state.cut_to_rect:
+        left = st.session_state.rect_left_width_margin * scale_w
+        top = st.session_state.rect_top_height_margin * scale_h
+        right = orig_img.width - st.session_state.rect_right_width_margin * scale_w
+        bottom = orig_img.height - st.session_state.rect_bottom_height_margin * scale_h
+
+        left = max(0, left)
+        top = max(0, top)
+        right = min(orig_img.width, right)
+        bottom = min(orig_img.height, bottom)
+
+        if right > left and bottom > top:
+            orig_img = orig_img.crop((left, top, right, bottom))
+
+    # ---------------------
+    # Apply watermark if enabled
+    # ---------------------
+    
+    if st.session_state.watermark_enabled:
+        orig_img = add_watermark_to_image(orig_img, st.session_state.watermark_text)
+    
+    img_bytes = io.BytesIO()
+    orig_img.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+    st.session_state.original_image_bytes = img_bytes
+
+    st.success("Original image (altered) is ready for download!")
+    
+    return orig_img, img_bytes
+    
+    
+
 
 how_to_use_text = """
 This app allows you to correct images if they are turned, warped - or have 
