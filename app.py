@@ -4,6 +4,10 @@ Created on Sat Feb 21 13:06:28 2026
 
 @author: Wolfgang Reuter
 
+TODO: Refactor properly
+TODO: Add button for manual changes of parameters 
+TDOO: Add brightness change
+
 Usage: 
     1) cd to directory 
     2) In an anaconda shell, type streamlit run app.py
@@ -17,7 +21,7 @@ import numpy as np
 from skimage.transform import ProjectiveTransform, warp
 
 from utils import resize_image, add_watermark_to_image, how_to_use_text, \
-    transform_image, prepare_orig_image
+    transform_image
 
 st.set_page_config(page_title="Image Rotator + Warp + Rectangle", layout="wide")
 st.title("Image Correction")
@@ -62,6 +66,88 @@ defaults = {
     "watermark_text_orig": "",
     "cut_to_rect": False,
 }
+
+# =============================================================================
+# Functions 
+# =============================================================================
+
+def prepare_orig_image():
+    # Make a copy of the original full-res image
+    orig_img = st.session_state.orig_image.copy()
+
+    # ---------------------
+    # Apply rotation
+    # ---------------------
+    if st.session_state.degrees != 0:
+        orig_img = rotate(orig_img, st.session_state.degrees).convert("RGBA")
+
+    # ---------------------
+    # Apply trapezoidal warp
+    # ---------------------
+    img_array = np.array(orig_img)
+    h, w = img_array.shape[:2]
+    scale_w = w / st.session_state.image.width
+    scale_h = h / st.session_state.image.height
+
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.array([
+        [
+            st.session_state.warp_tl_x_offset * st.session_state.image.width * scale_w,
+            st.session_state.warp_tl_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            w + st.session_state.warp_tr_x_offset * st.session_state.image.width * scale_w,
+            st.session_state.warp_tr_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            w + st.session_state.warp_br_x_offset * st.session_state.image.width * scale_w,
+            h + st.session_state.warp_br_y_offset * st.session_state.image.height * scale_h,
+        ],
+        [
+            st.session_state.warp_bl_x_offset * st.session_state.image.width * scale_w,
+            h + st.session_state.warp_bl_y_offset * st.session_state.image.height * scale_h,
+        ],
+    ])
+
+    transform = ProjectiveTransform()
+    transform.estimate(dst, src)
+    warped = warp(img_array, transform, output_shape=(h, w))
+    orig_img = Image.fromarray((warped * 255).astype(np.uint8))
+
+    # ---------------------
+    # Cut to rectangle if requested
+    # ---------------------
+    if st.session_state.cut_to_rect:
+        left = st.session_state.rect_left_width_margin * scale_w
+        top = st.session_state.rect_top_height_margin * scale_h
+        right = orig_img.width - st.session_state.rect_right_width_margin * scale_w
+        bottom = orig_img.height - st.session_state.rect_bottom_height_margin * scale_h
+
+        left = max(0, left)
+        top = max(0, top)
+        right = min(orig_img.width, right)
+        bottom = min(orig_img.height, bottom)
+
+        if right > left and bottom > top:
+            orig_img = orig_img.crop((left, top, right, bottom))
+
+    # ---------------------
+    # Apply watermark if enabled
+    # ---------------------
+    
+    if st.session_state.watermark_enabled:
+        orig_img = add_watermark_to_image(orig_img, st.session_state.watermark_text)
+    
+    img_bytes = io.BytesIO()
+    orig_img.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+    st.session_state.original_image_bytes = img_bytes
+
+    st.success("Original image (altered) is ready for download!")
+    
+# =============================================================================
+# Set up defaults - and help message 
+# =============================================================================
 
 for key, value in defaults.items():
     if key not in st.session_state:
@@ -365,81 +451,8 @@ if st.session_state.image:
     if st.session_state.resized:
         if st.button("Prepare Original Image (Altered)"):
             with st.spinner("Preparing image for download..."):
-            # Make a copy of the original full-res image
             
-                orig_img, img_bytes = prepare_orig_image()
-            # orig_img = st.session_state.orig_image.copy()
-    
-            # # ---------------------
-            # # Apply rotation
-            # # ---------------------
-            # if st.session_state.degrees != 0:
-            #     orig_img = rotate(orig_img, st.session_state.degrees).convert("RGBA")
-    
-            # # ---------------------
-            # # Apply trapezoidal warp
-            # # ---------------------
-            # img_array = np.array(orig_img)
-            # h, w = img_array.shape[:2]
-            # scale_w = w / st.session_state.image.width
-            # scale_h = h / st.session_state.image.height
-    
-            # src = np.array([[0, 0], [w, 0], [w, h], [0, h]])
-            # dst = np.array([
-            #     [
-            #         st.session_state.warp_tl_x_offset * st.session_state.image.width * scale_w,
-            #         st.session_state.warp_tl_y_offset * st.session_state.image.height * scale_h,
-            #     ],
-            #     [
-            #         w + st.session_state.warp_tr_x_offset * st.session_state.image.width * scale_w,
-            #         st.session_state.warp_tr_y_offset * st.session_state.image.height * scale_h,
-            #     ],
-            #     [
-            #         w + st.session_state.warp_br_x_offset * st.session_state.image.width * scale_w,
-            #         h + st.session_state.warp_br_y_offset * st.session_state.image.height * scale_h,
-            #     ],
-            #     [
-            #         st.session_state.warp_bl_x_offset * st.session_state.image.width * scale_w,
-            #         h + st.session_state.warp_bl_y_offset * st.session_state.image.height * scale_h,
-            #     ],
-            # ])
-    
-            # transform = ProjectiveTransform()
-            # transform.estimate(dst, src)
-            # warped = warp(img_array, transform, output_shape=(h, w))
-            # orig_img = Image.fromarray((warped * 255).astype(np.uint8))
-    
-            # # ---------------------
-            # # Cut to rectangle if requested
-            # # ---------------------
-            # if st.session_state.cut_to_rect:
-            #     left = st.session_state.rect_left_width_margin * scale_w
-            #     top = st.session_state.rect_top_height_margin * scale_h
-            #     right = orig_img.width - st.session_state.rect_right_width_margin * scale_w
-            #     bottom = orig_img.height - st.session_state.rect_bottom_height_margin * scale_h
-    
-            #     left = max(0, left)
-            #     top = max(0, top)
-            #     right = min(orig_img.width, right)
-            #     bottom = min(orig_img.height, bottom)
-    
-            #     if right > left and bottom > top:
-            #         orig_img = orig_img.crop((left, top, right, bottom))
-    
-            # # ---------------------
-            # # Apply watermark if enabled
-            # # ---------------------
-            
-            # if st.session_state.watermark_enabled:
-            #     orig_img = add_watermark_to_image(orig_img, st.session_state.watermark_text)
-                
-            # Store processed bytes in session state
-            # img_bytes = io.BytesIO()
-            # orig_img.save(img_bytes, format="PNG")
-            # img_bytes.seek(0)
-            # st.session_state.original_image_bytes = img_bytes
-    
-            # st.success("Original image (altered) is ready for download!")
+                prepare_orig_image()
     
             # ---------------------
             # Show download button only if processed
