@@ -424,6 +424,8 @@ if st.session_state.image:
     # Display image
     # ---------------------
     
+    image_width = warped_image.size[0]
+    
     with image_col:
         st.image(warped_image, width=image_width)
         
